@@ -1,6 +1,6 @@
 import { analyze } from "@/lib/analytics/analyze";
 import { demoTrades } from "@/lib/solana/demo";
-import { fetchSolPriceUsd, fetchTrades } from "@/lib/solana/helius";
+import { fetchSolPriceUsd, fetchTokenSymbols, fetchTrades } from "@/lib/solana/helius";
 import type { AnalysisResult } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -51,6 +51,16 @@ export async function POST(request: Request) {
       };
       return Response.json(payload);
     }
+    // Attach real token symbols/names (pump.fun trades carry no symbol).
+    const symbols = await fetchTokenSymbols(
+      trades.map((t) => t.mint),
+      apiKey,
+    );
+    for (const t of trades) {
+      const label = symbols.get(t.mint);
+      if (label) t.symbol = label;
+    }
+
     const result = analyze(address, trades);
     return Response.json({ ...result, solPriceUsd } satisfies TradesResponse);
   } catch (err) {

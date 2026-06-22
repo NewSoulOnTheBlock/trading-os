@@ -253,6 +253,58 @@ export async function fetchTrades(
   return trades.sort((a, b) => a.timestamp - b.timestamp);
 }
 
+interface DasAsset {
+  id: string;
+  content?: { metadata?: { name?: string; symbol?: string } };
+  token_info?: { symbol?: string };
+}
+
+/**
+ * Resolve token symbols/names for a set of mints via the Helius DAS
+ * `getAssetBatch` RPC. Returns a mint -> display label map. Never throws —
+ * unresolved mints simply fall back to a shortened address in the UI.
+ */
+export async function fetchTokenSymbols(
+  mints: string[],
+  apiKey: string,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const unique = [...new Set(mints)].filter(Boolean);
+  if (!apiKey || unique.length === 0) return out;
+
+  const rpc = `https://mainnet.helius-rpc.com/?api-key=${apiKey}`;
+
+  for (let i = 0; i < unique.length; i += 1000) {
+    const ids = unique.slice(i, i + 1000);
+    try {
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "trading-os",
+          method: "getAssetBatch",
+          params: { ids },
+        }),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { result?: (DasAsset | null)[] };
+      for (const asset of data.result ?? []) {
+        if (!asset) continue;
+        const label =
+          asset.content?.metadata?.symbol ||
+          asset.token_info?.symbol ||
+          asset.content?.metadata?.name;
+        if (label) out.set(asset.id, label.trim());
+      }
+    } catch {
+      // ignore; leave these mints unresolved
+    }
+  }
+
+  return out;
+}
+
 /** Best-effort current SOL/USD price for display only (never throws). */
 export async function fetchSolPriceUsd(): Promise<number | undefined> {
   try {
