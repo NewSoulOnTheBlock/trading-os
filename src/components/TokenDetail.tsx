@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 
 import { PriceChart } from "@/components/PriceChart";
+import { TokenTagSelect } from "@/components/TokenTagSelect";
 import { fmtDuration, fmtNum, fmtSol, shortMint } from "@/lib/format";
 import { useLocalStorageState } from "@/lib/useLocalStorage";
 import type { AdvicePointer, PnLSummary, Trade } from "@/lib/types";
@@ -145,6 +146,9 @@ export function TokenDetail({ mint, address, trades, pnl, onBack }: Props) {
             </a>
           </div>
           <div className={`text-2xl font-semibold ${tone}`}>{fmtSol(realized)} SOL</div>
+        </div>
+        <div className="mt-3">
+          <TokenTagSelect address={address} mint={mint} />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Stat label="Round-trips" value={`${token?.roundTrips ?? 0}`} />

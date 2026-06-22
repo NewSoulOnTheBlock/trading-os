@@ -5,13 +5,23 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alerts } from "@/components/Alerts";
+import { ActivityHeatmap } from "@/components/ActivityHeatmap";
+import { EfficiencyPanel } from "@/components/EfficiencyPanel";
+import { EquityCurve } from "@/components/EquityCurve";
 import { Journal } from "@/components/Journal";
 import { LlmBriefing } from "@/components/LlmBriefing";
 import { MetricsPanel } from "@/components/MetricsPanel";
+import { OvertradingMeter } from "@/components/OvertradingMeter";
 import { Pointers } from "@/components/Pointers";
+import { PreTradeChecklist } from "@/components/PreTradeChecklist";
+import { RiskManager } from "@/components/RiskManager";
+import { SessionReport } from "@/components/SessionReport";
 import { StatCards } from "@/components/StatCards";
+import { StreakTracker } from "@/components/StreakTracker";
+import { TagSummary } from "@/components/TagSummary";
 import { TokenDetail } from "@/components/TokenDetail";
 import { TokenTable } from "@/components/TokenTable";
+import { Watchlist } from "@/components/Watchlist";
 import { fmtSol } from "@/lib/format";
 import type { AnalysisResult } from "@/lib/types";
 
@@ -139,6 +149,10 @@ export function Dashboard() {
 
           <StatCards analysis={data} solPriceUsd={data.solPriceUsd} />
 
+          <RiskManager analysis={data} address={address} />
+
+          <SessionReport analysis={data} />
+
           <section>
             <h2 className="mb-2 text-lg font-semibold">Daily pointers</h2>
             <Pointers pointers={data.pointers} />
@@ -146,12 +160,31 @@ export function Dashboard() {
 
           <LlmBriefing analysis={data} />
 
+          <EquityCurve metrics={data.metrics} />
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <ActivityHeatmap metrics={data.metrics} />
+            <StreakTracker metrics={data.metrics} address={address} />
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <OvertradingMeter metrics={data.metrics} />
+            <EfficiencyPanel metrics={data.metrics} />
+          </div>
+
           <div className="grid gap-6 lg:grid-cols-2">
             <MetricsPanel metrics={data.metrics} />
             <Alerts analysis={data} />
           </div>
 
           <TokenTable pnl={data.pnl} onSelect={setSelectedMint} />
+
+          <TagSummary pnl={data.pnl} address={address} />
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <PreTradeChecklist address={address} />
+            <Watchlist address={address} />
+          </div>
 
           {address ? <Journal address={address} /> : null}
         </div>

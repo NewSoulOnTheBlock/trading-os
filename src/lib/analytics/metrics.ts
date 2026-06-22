@@ -1,6 +1,7 @@
-import type { Metrics, PnLSummary, SessionStats, Trade } from "@/lib/types";
+import type { DayStat, EquityPoint, Metrics, PnLSummary, SessionStats, Trade } from "@/lib/types";
 
 const DAY = 86400;
+const EPS = 1e-9;
 
 function utcDate(ts: number): string {
   return new Date(ts * 1000).toISOString().slice(0, 10);
@@ -17,6 +18,7 @@ function median(values: number[]): number {
 export function computeMetrics(trades: Trade[], pnl: PnLSummary): Metrics {
   const tradesByDay = new Map<string, number>();
   const hourHistogram = new Array(24).fill(0);
+  const dowHistogram = new Array(7).fill(0);
   let positionSum = 0;
   let positionCount = 0;
   let maxPosition = 0;
@@ -24,7 +26,9 @@ export function computeMetrics(trades: Trade[], pnl: PnLSummary): Metrics {
   for (const t of trades) {
     const day = utcDate(t.timestamp);
     tradesByDay.set(day, (tradesByDay.get(day) ?? 0) + 1);
-    hourHistogram[new Date(t.timestamp * 1000).getUTCHours()]++;
+    const d = new Date(t.timestamp * 1000);
+    hourHistogram[d.getUTCHours()]++;
+    dowHistogram[d.getUTCDay()]++;
     if (t.side === "buy") {
       positionSum += t.solAmount;
       positionCount++;
@@ -56,6 +60,100 @@ export function computeMetrics(trades: Trade[], pnl: PnLSummary): Metrics {
     if (reentered) revenge++;
   }
 
+  // --- Equity curve + max drawdown (over closed round-trips, chronological) ---
+  const closed = [...pnl.trips].sort((a, b) => a.closeTs - b.closeTs);
+  const equityCurve: EquityPoint[] = [];
+  const dowPnl = new Array(7).fill(0);
+  const hourPnl = new Array(24).fill(0);
+  const pnlByDay = new Map<string, number>();
+  let cum = 0;
+  let peak = 0;
+  let maxDrawdownSol = 0;
+  let maxDrawdownPct = 0;
+  for (const t of closed) {
+    cum += t.pnlSol;
+    equityCurve.push({ ts: t.closeTs, cum });
+    if (cum > peak) peak = cum;
+    const dd = peak - cum;
+    if (dd > maxDrawdownSol) {
+      maxDrawdownSol = dd;
+      maxDrawdownPct = peak > EPS ? dd / peak : 0;
+    }
+    const cd = new Date(t.closeTs * 1000);
+    dowPnl[cd.getUTCDay()] += t.pnlSol;
+    hourPnl[cd.getUTCHours()] += t.pnlSol;
+    const day = utcDate(t.closeTs);
+    pnlByDay.set(day, (pnlByDay.get(day) ?? 0) + t.pnlSol);
+  }
+
+  // --- Per-day rollup, streaks, overtrading ---
+  const allDays = new Set<string>([...tradesByDay.keys(), ...pnlByDay.keys()]);
+  const dailyPnl: DayStat[] = [...allDays]
+    .sort()
+    .map((date) => ({
+      date,
+      trades: tradesByDay.get(date) ?? 0,
+      realizedSol: pnlByDay.get(date) ?? 0,
+    }));
+
+  let greenDays = 0;
+  let redDays = 0;
+  let greenTradeSum = 0;
+  let redTradeSum = 0;
+  for (const d of dailyPnl) {
+    if (d.realizedSol > EPS) {
+      greenDays++;
+      greenTradeSum += d.trades;
+    } else if (d.realizedSol < -EPS) {
+      redDays++;
+      redTradeSum += d.trades;
+    }
+  }
+  // Current trailing green streak (most-recent active days backward).
+  let currentGreenStreak = 0;
+  for (let i = dailyPnl.length - 1; i >= 0; i--) {
+    if (dailyPnl[i].realizedSol > EPS) currentGreenStreak++;
+    else break;
+  }
+  let longestGreenStreak = 0;
+  let run = 0;
+  for (const d of dailyPnl) {
+    if (d.realizedSol > EPS) {
+      run++;
+      if (run > longestGreenStreak) longestGreenStreak = run;
+    } else {
+      run = 0;
+    }
+  }
+
+  // --- Entry/exit efficiency vs each token's own observed price band ---
+  const band = new Map<string, { min: number; max: number }>();
+  for (const t of trades) {
+    if (t.priceSol <= 0) continue;
+    const b = band.get(t.mint);
+    if (!b) band.set(t.mint, { min: t.priceSol, max: t.priceSol });
+    else {
+      if (t.priceSol < b.min) b.min = t.priceSol;
+      if (t.priceSol > b.max) b.max = t.priceSol;
+    }
+  }
+  let entryEffSum = 0;
+  let entryEffN = 0;
+  let exitEffSum = 0;
+  let exitEffN = 0;
+  for (const t of trades) {
+    const b = band.get(t.mint);
+    if (!b || b.max - b.min < EPS || t.priceSol <= 0) continue;
+    const range = b.max - b.min;
+    if (t.side === "buy") {
+      entryEffSum += (b.max - t.priceSol) / range; // near low => 1
+      entryEffN++;
+    } else {
+      exitEffSum += (t.priceSol - b.min) / range; // near high => 1
+      exitEffN++;
+    }
+  }
+
   const roundTrips = pnl.trips.length;
   return {
     activeDays,
@@ -69,6 +167,21 @@ export function computeMetrics(trades: Trade[], pnl: PnLSummary): Metrics {
     maxTradesInDay,
     hourHistogram,
     bigLossRate: roundTrips ? bigLosses / roundTrips : 0,
+    equityCurve,
+    maxDrawdownSol,
+    maxDrawdownPct,
+    dowHistogram,
+    dowPnl,
+    hourPnl,
+    dailyPnl,
+    greenDays,
+    redDays,
+    currentGreenStreak,
+    longestGreenStreak,
+    avgTradesGreenDay: greenDays ? greenTradeSum / greenDays : 0,
+    avgTradesRedDay: redDays ? redTradeSum / redDays : 0,
+    avgEntryEfficiency: entryEffN ? entryEffSum / entryEffN : 0,
+    avgExitEfficiency: exitEffN ? exitEffSum / exitEffN : 0,
   };
 }
 

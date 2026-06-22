@@ -70,6 +70,19 @@ export interface PnLSummary {
   trips: RoundTrip[];
 }
 
+/** A point on the cumulative realized-P&L (equity) curve. */
+export interface EquityPoint {
+  ts: number;
+  cum: number;
+}
+
+/** Per-active-day rollup used by streaks, overtrading, and session reports. */
+export interface DayStat {
+  date: string;
+  trades: number;
+  realizedSol: number;
+}
+
 export interface Metrics {
   activeDays: number;
   tradesPerActiveDay: number;
@@ -87,6 +100,34 @@ export interface Metrics {
   hourHistogram: number[];
   /** Share of round-trips with ROI < -50%. */
   bigLossRate: number;
+
+  // --- Extended analytics ---
+  /** Cumulative realized SOL over time (by round-trip close). */
+  equityCurve: EquityPoint[];
+  /** Largest peak-to-trough decline of the equity curve, in SOL. */
+  maxDrawdownSol: number;
+  /** Same decline as a fraction of the running peak (0..1). */
+  maxDrawdownPct: number;
+  /** Day-of-week (0=Sun..6=Sat, UTC) -> trade count. */
+  dowHistogram: number[];
+  /** Day-of-week (0=Sun..6=Sat) -> realized SOL. */
+  dowPnl: number[];
+  /** Hour-of-day (UTC) -> realized SOL. */
+  hourPnl: number[];
+  /** Per active day, ascending by date. */
+  dailyPnl: DayStat[];
+  greenDays: number;
+  redDays: number;
+  /** Trailing consecutive green (profitable) active days. */
+  currentGreenStreak: number;
+  longestGreenStreak: number;
+  /** Avg trades on green vs red days (overtrading signal). */
+  avgTradesGreenDay: number;
+  avgTradesRedDay: number;
+  /** Avg buy-fill closeness to the token's low (0..1, higher = better entries). */
+  avgEntryEfficiency: number;
+  /** Avg sell-fill closeness to the token's high (0..1, higher = better exits). */
+  avgExitEfficiency: number;
 }
 
 /** A scored, day-scoped snapshot used to drive advice. */
