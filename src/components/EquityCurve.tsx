@@ -77,7 +77,10 @@ export function EquityCurve({ metrics }: { metrics: Metrics }) {
         <span>
           <span className="text-neutral-500">Max drawdown </span>
           <span className="text-rose-400">
-            -{metrics.maxDrawdownSol.toFixed(2)} SOL ({(metrics.maxDrawdownPct * 100).toFixed(0)}%)
+            -{metrics.maxDrawdownSol.toFixed(2)} SOL
+            {metrics.maxDrawdownPct > 0 && metrics.maxDrawdownPct <= 1
+              ? ` (${(metrics.maxDrawdownPct * 100).toFixed(0)}%)`
+              : ""}
           </span>
         </span>
       </div>
