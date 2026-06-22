@@ -54,6 +54,8 @@ interface HeliusTx {
 }
 
 const EPS = 1e-9;
+/** Minimum SOL leg to treat a token movement as a trade (filters dust/airdrops). */
+const SOL_DUST = 0.0005;
 
 function rawToNum(b?: HeliusTokenBalance): number {
   if (!b?.rawTokenAmount) return 0;
@@ -141,10 +143,12 @@ function parseFromSwapEvent(tx: HeliusTx, address: string): Trade | null {
 }
 
 /**
- * Fallback path: DEXes like pump.fun / PUMP_AMM tag the tx `type=SWAP` but do
- * NOT populate `events.swap`. Derive the trade from the user's net token change
- * (from tokenTransfers) and net SOL change (native balance change + any WSOL
- * legs), which nets fees/rent and reflects the true economic delta.
+ * Fallback path: many venues (pump.fun, Axiom/router-routed, bots) are NOT
+ * tagged with a populated `events.swap` — and some aren't even tagged
+ * `type=SWAP`. Derive the trade from the user's net token change
+ * (tokenTransfers) and net SOL change (WSOL leg, else native balance change),
+ * requiring the token and SOL legs to move in OPPOSITE directions so plain
+ * transfers / airdrops are not mistaken for trades.
  */
 function parseFromTransfers(tx: HeliusTx, address: string): Trade | null {
   const tokenNet = new Map<string, number>();
@@ -172,15 +176,23 @@ function parseFromTransfers(tx: HeliusTx, address: string): Trade | null {
   }
   if (!mint || Math.abs(net) < EPS) return null;
 
-  const side: Side = net > 0 ? "buy" : "sell";
-  const tokenAmount = Math.abs(net);
-
-  // SOL value: prefer the explicit WSOL leg; otherwise the native balance delta.
+  // Signed SOL delta: prefer the explicit WSOL leg, else the native balance
+  // change (which nets fees/rent). Receiving SOL is positive.
   const userAcct = (tx.accountData ?? []).find((a) => a.account === address);
-  const nativeSol = userAcct ? Math.abs(userAcct.nativeBalanceChange) / LAMPORTS : 0;
-  const wsolSol = Math.abs(wsolNet);
-  const solAmount = wsolSol > EPS ? wsolSol : nativeSol;
-  if (solAmount <= EPS) return null;
+  const nativeDelta = userAcct ? userAcct.nativeBalanceChange / LAMPORTS : 0;
+  const solSigned = Math.abs(wsolNet) > EPS ? wsolNet : nativeDelta;
+
+  let side: Side;
+  if (net > 0 && solSigned < -SOL_DUST) {
+    side = "buy"; // received token, spent SOL
+  } else if (net < 0 && solSigned > SOL_DUST) {
+    side = "sell"; // sent token, received SOL
+  } else {
+    return null; // not a SOL<->token swap (transfer, airdrop, deposit, etc.)
+  }
+
+  const tokenAmount = Math.abs(net);
+  const solAmount = Math.abs(solSigned);
 
   return {
     signature: tx.signature,
@@ -194,48 +206,62 @@ function parseFromTransfers(tx: HeliusTx, address: string): Trade | null {
   };
 }
 
-// When the `type=SWAP` filter finds no matching events inside a scan window,
-// Helius returns 404 with a hint signature to continue paging from.
+// Legacy: when the `type=SWAP` filter found no events in a scan window, Helius
+// returned 404 with a continuation hint. We no longer use the type filter (it
+// drops Axiom/router-routed and other untagged swaps), but keep the pattern in
+// case a 404 with a hint is ever returned mid-scan.
 const BEFORE_HINT = /before-signature[`'" ]*parameter set to[`'" ]*([1-9A-HJ-NP-Za-km-z]{32,88})/i;
 
 /**
  * Fetch and normalize a wallet's swap history from the Helius Enhanced
  * Transactions API. Paginates with `before` up to `maxPages` (100 tx/page).
  *
- * Handles the Enhanced API's windowed 404 ("Failed to find events within the
- * search period"): rather than erroring, it follows the returned continuation
- * signature so wallets with sparse swap history still resolve.
+ * We deliberately do NOT use the `type=SWAP` filter: Helius only tags swaps it
+ * recognizes from known DEX programs, which misses Axiom/router-routed, bot, and
+ * many pump.fun trades (often tagged `TRANSFER`). Instead we scan every
+ * transaction and detect swaps ourselves via `parseSwap` (swap-event first, then
+ * a signed token<->SOL transfer heuristic).
  */
 export async function fetchTrades(
   address: string,
   opts: { apiKey: string; maxPages?: number } = { apiKey: "" },
 ): Promise<Trade[]> {
-  const { apiKey, maxPages = 20 } = opts;
+  const { apiKey, maxPages = 40 } = opts;
   if (!apiKey) throw new Error("Missing Helius API key");
 
   const trades: Trade[] = [];
   let before: string | undefined;
 
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
   for (let page = 0; page < maxPages; page++) {
     const url = new URL(`https://api.helius.xyz/v0/addresses/${address}/transactions`);
     url.searchParams.set("api-key", apiKey);
-    url.searchParams.set("type", "SWAP");
     url.searchParams.set("limit", "100");
     if (before) url.searchParams.set("before", before);
 
-    const res = await fetch(url, { headers: { accept: "application/json" } });
+    // Fetch with bounded retry on rate limiting (free tier is easily tripped).
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      res = await fetch(url, { headers: { accept: "application/json" } });
+      if (res.status !== 429) break;
+      const retryAfter = Number(res.headers.get("retry-after")) || 0;
+      await sleep(retryAfter > 0 ? retryAfter * 1000 : 400 * (attempt + 1));
+    }
+    if (!res) break;
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      // 404 = no swaps in this window; follow the continuation hint if present.
       if (res.status === 404) {
         const hint = body.match(BEFORE_HINT)?.[1];
         if (hint && hint !== before) {
           before = hint;
           continue;
         }
-        break; // no hint and no more matches -> done
+        break; // no more transactions
       }
+      // Rate-limited past our retries: return what we have rather than failing.
+      if (res.status === 429) break;
       throw new Error(`Helius ${res.status}: ${body.slice(0, 200)}`);
     }
 
@@ -248,6 +274,9 @@ export async function fetchTrades(
     }
     before = batch[batch.length - 1]?.signature;
     if (batch.length < 100) break;
+
+    // Gentle pacing to stay under the free-tier rate limit.
+    await sleep(120);
   }
 
   return trades.sort((a, b) => a.timestamp - b.timestamp);

@@ -1,7 +1,13 @@
 import type { PnLSummary } from "@/lib/types";
 import { fmtSol, shortMint } from "@/lib/format";
 
-export function TokenTable({ pnl }: { pnl: PnLSummary }) {
+export function TokenTable({
+  pnl,
+  onSelect,
+}: {
+  pnl: PnLSummary;
+  onSelect?: (mint: string) => void;
+}) {
   const rows = pnl.perToken.slice(0, 15);
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4">
@@ -21,8 +27,18 @@ export function TokenTable({ pnl }: { pnl: PnLSummary }) {
           </thead>
           <tbody>
             {rows.map((t) => (
-              <tr key={t.mint} className="border-t border-neutral-800">
-                <td className="py-1.5 pr-2 font-medium">{t.symbol ?? shortMint(t.mint)}</td>
+              <tr
+                key={t.mint}
+                onClick={() => onSelect?.(t.mint)}
+                className={`border-t border-neutral-800 ${
+                  onSelect ? "cursor-pointer hover:bg-neutral-800/40" : ""
+                }`}
+              >
+                <td className="py-1.5 pr-2 font-medium">
+                  <span className={onSelect ? "text-violet-300 hover:underline" : ""}>
+                    {t.symbol ?? shortMint(t.mint)}
+                  </span>
+                </td>
                 <td className="py-1.5 pr-2 text-right text-neutral-400">{t.roundTrips}</td>
                 <td className="py-1.5 pr-2 text-right text-neutral-400">{t.wins}</td>
                 <td
@@ -47,6 +63,9 @@ export function TokenTable({ pnl }: { pnl: PnLSummary }) {
           </tbody>
         </table>
       </div>
+      {rows.length > 0 && onSelect ? (
+        <p className="mt-2 text-xs text-neutral-600">Click a token for its entry/exit chart & advice.</p>
+      ) : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { LlmBriefing } from "@/components/LlmBriefing";
 import { MetricsPanel } from "@/components/MetricsPanel";
 import { Pointers } from "@/components/Pointers";
 import { StatCards } from "@/components/StatCards";
+import { TokenDetail } from "@/components/TokenDetail";
 import { TokenTable } from "@/components/TokenTable";
 import { fmtSol } from "@/lib/format";
 import type { AnalysisResult } from "@/lib/types";
@@ -31,6 +32,7 @@ export function Dashboard() {
   const [data, setData] = useState<TradesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedMint, setSelectedMint] = useState<string | null>(null);
   const lastAnalyzed = useRef<string | null>(null);
 
   const walletAddress = publicKey?.toBase58();
@@ -42,6 +44,7 @@ export function Dashboard() {
     }
     setLoading(true);
     setError(null);
+    setSelectedMint(null);
     lastAnalyzed.current = address;
     try {
       const res = await fetch("/api/trades", {
@@ -116,7 +119,15 @@ export function Dashboard() {
         <EmptyState />
       ) : null}
 
-      {data ? (
+      {data && selectedMint ? (
+        <TokenDetail
+          mint={selectedMint}
+          address={address}
+          trades={data.trades}
+          pnl={data.pnl}
+          onBack={() => setSelectedMint(null)}
+        />
+      ) : data ? (
         <div className="space-y-6">
           <SessionBanner data={data} />
 
@@ -140,7 +151,7 @@ export function Dashboard() {
             <Alerts analysis={data} />
           </div>
 
-          <TokenTable pnl={data.pnl} />
+          <TokenTable pnl={data.pnl} onSelect={setSelectedMint} />
 
           {address ? <Journal address={address} /> : null}
         </div>

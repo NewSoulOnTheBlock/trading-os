@@ -118,6 +118,8 @@ export interface AnalysisResult {
   metrics: Metrics;
   session: SessionStats;
   pointers: AdvicePointer[];
+  /** Raw normalized swaps (symbol-enriched), for per-token detail/charting. */
+  trades: Trade[];
   /** Set when live data was unavailable and demo data was substituted. */
   demo?: boolean;
   note?: string;

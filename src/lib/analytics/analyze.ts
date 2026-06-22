@@ -16,5 +16,6 @@ export function analyze(address: string, trades: Trade[]): AnalysisResult {
     metrics,
     session,
     pointers,
+    trades,
   };
 }
