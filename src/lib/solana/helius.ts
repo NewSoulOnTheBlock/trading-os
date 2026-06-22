@@ -112,15 +112,23 @@ export function parseSwap(tx: HeliusTx, address: string): Trade | null {
   };
 }
 
+// When the `type=SWAP` filter finds no matching events inside a scan window,
+// Helius returns 404 with a hint signature to continue paging from.
+const BEFORE_HINT = /before-signature[`'" ]*parameter set to[`'" ]*([1-9A-HJ-NP-Za-km-z]{32,88})/i;
+
 /**
  * Fetch and normalize a wallet's swap history from the Helius Enhanced
  * Transactions API. Paginates with `before` up to `maxPages` (100 tx/page).
+ *
+ * Handles the Enhanced API's windowed 404 ("Failed to find events within the
+ * search period"): rather than erroring, it follows the returned continuation
+ * signature so wallets with sparse swap history still resolve.
  */
 export async function fetchTrades(
   address: string,
   opts: { apiKey: string; maxPages?: number } = { apiKey: "" },
 ): Promise<Trade[]> {
-  const { apiKey, maxPages = 10 } = opts;
+  const { apiKey, maxPages = 20 } = opts;
   if (!apiKey) throw new Error("Missing Helius API key");
 
   const trades: Trade[] = [];
@@ -134,10 +142,21 @@ export async function fetchTrades(
     if (before) url.searchParams.set("before", before);
 
     const res = await fetch(url, { headers: { accept: "application/json" } });
+
     if (!res.ok) {
       const body = await res.text().catch(() => "");
+      // 404 = no swaps in this window; follow the continuation hint if present.
+      if (res.status === 404) {
+        const hint = body.match(BEFORE_HINT)?.[1];
+        if (hint && hint !== before) {
+          before = hint;
+          continue;
+        }
+        break; // no hint and no more matches -> done
+      }
       throw new Error(`Helius ${res.status}: ${body.slice(0, 200)}`);
     }
+
     const batch = (await res.json()) as HeliusTx[];
     if (!Array.isArray(batch) || batch.length === 0) break;
 
