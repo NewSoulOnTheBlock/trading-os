@@ -24,13 +24,36 @@ interface HeliusSwapEvent {
   tokenInputs?: HeliusTokenBalance[];
   tokenOutputs?: HeliusTokenBalance[];
 }
+interface HeliusTokenTransfer {
+  fromUserAccount?: string;
+  toUserAccount?: string;
+  mint: string;
+  /** UI (decimal-adjusted) amount. */
+  tokenAmount: number;
+}
+interface HeliusNativeTransfer {
+  fromUserAccount?: string;
+  toUserAccount?: string;
+  /** Lamports. */
+  amount: number;
+}
+interface HeliusAccountData {
+  account: string;
+  nativeBalanceChange: number;
+  tokenBalanceChanges?: HeliusTokenBalance[];
+}
 interface HeliusTx {
   signature: string;
   timestamp: number;
   source?: string;
   type?: string;
   events?: { swap?: HeliusSwapEvent };
+  tokenTransfers?: HeliusTokenTransfer[];
+  nativeTransfers?: HeliusNativeTransfer[];
+  accountData?: HeliusAccountData[];
 }
+
+const EPS = 1e-9;
 
 function rawToNum(b?: HeliusTokenBalance): number {
   if (!b?.rawTokenAmount) return 0;
@@ -67,6 +90,11 @@ function splitSol(legs: HeliusTokenBalance[]): { sol: number; token?: HeliusToke
 
 /** Convert one Helius SWAP transaction into a normalized Trade (or null). */
 export function parseSwap(tx: HeliusTx, address: string): Trade | null {
+  return parseFromSwapEvent(tx, address) ?? parseFromTransfers(tx, address);
+}
+
+/** Primary path: aggregators (e.g. Jupiter) that populate `events.swap`. */
+function parseFromSwapEvent(tx: HeliusTx, address: string): Trade | null {
   const swap = tx.events?.swap;
   if (!swap) return null;
 
@@ -104,6 +132,60 @@ export function parseSwap(tx: HeliusTx, address: string): Trade | null {
     signature: tx.signature,
     timestamp: tx.timestamp,
     mint: token.mint,
+    side,
+    solAmount,
+    tokenAmount,
+    priceSol: solAmount / tokenAmount,
+    source: tx.source,
+  };
+}
+
+/**
+ * Fallback path: DEXes like pump.fun / PUMP_AMM tag the tx `type=SWAP` but do
+ * NOT populate `events.swap`. Derive the trade from the user's net token change
+ * (from tokenTransfers) and net SOL change (native balance change + any WSOL
+ * legs), which nets fees/rent and reflects the true economic delta.
+ */
+function parseFromTransfers(tx: HeliusTx, address: string): Trade | null {
+  const tokenNet = new Map<string, number>();
+  let wsolNet = 0;
+
+  for (const t of tx.tokenTransfers ?? []) {
+    const amt = Number(t.tokenAmount) || 0;
+    if (amt === 0) continue;
+    let delta = 0;
+    if (t.toUserAccount === address) delta += amt;
+    if (t.fromUserAccount === address) delta -= amt;
+    if (delta === 0) continue;
+    if (t.mint === WSOL) wsolNet += delta;
+    else tokenNet.set(t.mint, (tokenNet.get(t.mint) ?? 0) + delta);
+  }
+
+  // Dominant non-WSOL token leg by absolute net change.
+  let mint: string | undefined;
+  let net = 0;
+  for (const [m, v] of tokenNet) {
+    if (Math.abs(v) > Math.abs(net)) {
+      net = v;
+      mint = m;
+    }
+  }
+  if (!mint || Math.abs(net) < EPS) return null;
+
+  const side: Side = net > 0 ? "buy" : "sell";
+  const tokenAmount = Math.abs(net);
+
+  // SOL value: prefer the explicit WSOL leg; otherwise the native balance delta.
+  const userAcct = (tx.accountData ?? []).find((a) => a.account === address);
+  const nativeSol = userAcct ? Math.abs(userAcct.nativeBalanceChange) / LAMPORTS : 0;
+  const wsolSol = Math.abs(wsolNet);
+  const solAmount = wsolSol > EPS ? wsolSol : nativeSol;
+  if (solAmount <= EPS) return null;
+
+  return {
+    signature: tx.signature,
+    timestamp: tx.timestamp,
+    mint,
     side,
     solAmount,
     tokenAmount,
