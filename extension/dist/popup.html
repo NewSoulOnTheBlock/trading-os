@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root { color-scheme: dark; }
+      body { width: 320px; margin: 0; padding: 14px; background:#0a0a0b; color:#e5e5e5;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+      h1 { font-size:15px; margin:0 0 2px; } h1 span { color:#a78bfa; }
+      p.sub { margin:0 0 12px; font-size:11px; color:#71717a; }
+      label { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.06em; color:#71717a; margin:10px 0 4px; }
+      input { width:100%; box-sizing:border-box; background:#0c0c0f; border:1px solid #27272a; color:#e5e5e5;
+        border-radius:8px; padding:8px 9px; font-size:13px; outline:none; }
+      input:focus { border-color:#7c3aed; }
+      .row { display:flex; gap:8px; }
+      button { margin-top:14px; width:100%; background:#7c3aed; color:#fff; border:none; border-radius:8px;
+        padding:9px; font-size:13px; font-weight:600; cursor:pointer; }
+      button:hover { background:#8b5cf6; }
+      .saved { margin-top:8px; font-size:11px; color:#34d399; min-height:14px; }
+      .note { margin-top:10px; font-size:10px; color:#52525b; line-height:1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>Trading <span>OS</span></h1>
+    <p class="sub">Coaching &amp; risk controls injected into axiom.trade</p>
+
+    <label>Helius API key</label>
+    <input id="heliusKey" placeholder="Helius API key" />
+
+    <label>Default wallet (optional)</label>
+    <input id="wallet" placeholder="Auto-detected on Axiom if blank" />
+
+    <div class="row">
+      <div style="flex:1">
+        <label>Daily loss limit (SOL)</label>
+        <input id="dailyLossLimit" type="number" placeholder="0 = off" />
+      </div>
+      <div style="flex:1">
+        <label>Weekly goal (SOL)</label>
+        <input id="weeklyGoal" type="number" placeholder="0 = off" />
+      </div>
+    </div>
+
+    <button id="save">Save</button>
+    <div class="saved" id="saved"></div>
+    <p class="note">
+      Open axiom.trade and click the “Trading OS” button (bottom-right) to load your coaching panel.
+      The daily loss limit arms a full-page STOP banner when breached.
+    </p>
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

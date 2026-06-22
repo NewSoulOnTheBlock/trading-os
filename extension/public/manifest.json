@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Trading OS for Axiom",
+  "version": "0.1.0",
+  "description": "Injects realized-P&L coaching, a daily-loss circuit breaker, streaks and analytics directly into axiom.trade.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://api.helius.xyz/*",
+    "https://mainnet.helius-rpc.com/*",
+    "https://api.dexscreener.com/*",
+    "https://api.coingecko.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Trading OS",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://axiom.trade/*", "https://*.axiom.trade/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
